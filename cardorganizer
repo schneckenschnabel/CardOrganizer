@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+
+"""
+This script automatically sorts and organizes image files (specifically PNG files,
+assumed to be "cards" from various Illusion games) into a structured directory
+hierarchy based on metadata found within the files themselves. It uses pattern
+matching to identify the game, card type, and gender (if applicable) of each card.
+"""
+
+import os
+import re
+import shutil
+import argparse
+import ahocorasick
+import multiprocessing
+from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
+from typing import Tuple, List, Dict, Any
+
+# Constants
+PNG_END_MARKER = "IEND"
+SEX_MARKER = "sex"
+MALE_CODE = "\x00"
+FEMALE_CODE = "\x01"
+GAMES_SPECIAL_CHAR_AA2 = "yGfBbgz"  # Corrected special character
+SCENE_SPECIAL_CHAR_AA2 = "\x00SCENE\x00"
+SUPPORTED_EXTENSIONS = (".png",)
+
+# Type Aliases for Clarity
+CardInfo = Tuple[str, List[str]]
+GameData = List[CardInfo]
+GamesDict = Dict[str, GameData]
+SexDict = Dict[str, str]
+CardArgs = Tuple[argparse.Namespace, str, str, ahocorasick.Automaton]
+
+
+games: GamesDict = {
+    "KK": [("chara", ["【KoiKatuChara】", "【KoiKatuCharaS】", "【KoiKatuCharaSP】"]), ("coordinate", ["【KoiKatuClothes】"]), ("scene", ["【KStudio】"])],
+    # check if KKS coordinate is different
+    "KKS": [("chara", ["【KoiKatuCharaSun】"])],
+    "AI": [("chara", ["【AIS_Chara】"]), ("coordinate", ["【AIS_Clothes】"]), ("scene", ["【StudioNEOV2】"]), ("housing", ["【AIS_Housing】"])],
+    # add EC coordinate
+    "EC": [("chara", ["EroMakeChara"]), ("hscene", ["EroMakeHScene"]), ("map", ["EroMakeMap"]), ("pose", ["EroMakePose"])],
+    # add HS coordinate
+    "HS": [("female", ["【HoneySelectCharaFemale】"]), ("male", ["【HoneySelectCharaMale】"]), ("scene", ["【-neo-】"])],
+    # add PH coordinate
+    "PH": [("female", ["【PlayHome_Female】"]), ("male", ["【PlayHome_Male】"]), ("scene", ["【PHStudio】"])],
+    # add SBPR coordinate
+    "SBPR": [("female", ["【PremiumResortCharaFemale】"]), ("male", ["【PremiumResortCharaMale】"])],
+    "HC": [("chara", ["【HCChara】"])],  # add HC coordinate and scene
+    "AA2": [("chara", [GAMES_SPECIAL_CHAR_AA2]), ("scene", [SCENE_SPECIAL_CHAR_AA2])],
+    # add RG coordinate
+    "RG": [("chara", ["【RG_Chara】"]), ("scene", ["【RoomStudio】"])],
+}
+
+sexs: SexDict = {MALE_CODE: "male", FEMALE_CODE: "female"}
+
+
+def parse_args() -> argparse.Namespace:
+    """Parses command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Sort illusion cards automatically.")
+    parser.add_argument(
+        "target_dir", help="The directory to search for cards.")
+    parser.add_argument(
+        "output_dir", help="The directory where cards will be output.")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Print card names instead of a progress bar.")
+    parser.add_argument("--recursive", "-r", action="store_true",
+                        help="Seach subdirs for cards as well.")
+    parser.add_argument("--testrun", action="store_true",
+                        help="Test the program without moving files.")
+    parser.add_argument("--userdata", choices=[
+                        "KK", "KKS"], help=f"Place cards in correct folders inside output_dir that points to UserData.")
+    parser.add_argument("--userdata-subdir", default="cardorganizer",
+                        metavar="DIR", help="Specify output subdir inside userdata")
+    args = parser.parse_args()
+    args.target_dir = os.path.normpath(args.target_dir)
+    args.output_dir = os.path.normpath(args.output_dir)
+    return args
+
+
+def create_trie(games: GamesDict) -> ahocorasick.Automaton:
+    """Creates an Aho-Corasick trie for efficient multi-pattern searching."""
+    trie = ahocorasick.Automaton()
+    for game_name, card_info_list in games.items():
+        for pattern_path, patterns in card_info_list:
+            for pattern in patterns:
+                trie.add_word(pattern, (game_name, pattern_path))
+    trie.add_word(SEX_MARKER, SEX_MARKER)
+    trie.make_automaton()
+    return trie
+
+
+def get_card_dir(trie: ahocorasick.Automaton, data: str, args: argparse.Namespace) -> str:
+    """
+    Determines the destination directory for a card based on its content.
+
+    Args:
+        trie: The Aho-Corasick trie.
+        data: The content of the card file.
+        args: The command-line arguments.
+
+    Returns:
+        The relative path to the destination directory, or an empty string if
+        the card cannot be classified.
+    """
+    png_end_index = data.find(PNG_END_MARKER)
+    if png_end_index == -1:
+        return ""
+
+    game_name, pattern_path, sex = "", "", ""
+    for end_index, value in trie.iter(data, png_end_index):
+        if value == SEX_MARKER:
+            if sex == "":
+                temp = data[end_index + 1]
+                if temp in sexs:
+                    sex = temp
+        else:
+            if pattern_path != "scene":
+                game_name, pattern_path = value
+
+    if "" in {game_name, pattern_path}:
+        return ""
+
+    if args.userdata is not None:
+        allowlist = [args.userdata]
+        if args.userdata == "KKS":
+            allowlist.append("KK")
+        if game_name not in allowlist:
+            return ""
+        if pattern_path == "chara" and sex != "":
+            pattern_path = os.path.join(pattern_path, sexs[sex])
+        if pattern_path == "scene":
+            pattern_path = os.path.join("studio", pattern_path)
+        return os.path.join(pattern_path, args.userdata_subdir)
+    else:
+        if pattern_path == "chara" and sex != "":
+            pattern_path = sexs[sex]
+        return os.path.join(game_name, pattern_path)
+
+
+def get_unused_path(dirpath: str, filename: str) -> Tuple[bool, str]:
+    """
+    Finds an unused path for a file, handling duplicate filenames.
+
+    Args:
+        dirpath: The directory path.
+        filename: The filename.
+
+    Returns:
+        A tuple: (True if the filename was changed, the new path).
+    """
+    path = os.path.join(dirpath, filename)
+    if not os.path.exists(path):
+        return (False, path)
+
+    index = 1
+    base, ext = os.path.splitext(filename)
+    match = re.match(r"^(.+?)(?:\s+\((\d+)\))?$", base)
+    if match:
+        new_base, new_index = match.groups()
+        if new_index:
+            index = int(new_index) + 1
+        filename = f"{new_base.strip()}{ext}"
+
+    while True:
+        base, ext = os.path.splitext(filename)
+        path = os.path.join(dirpath, f"{base} ({index}){ext}")
+        if not os.path.exists(path):
+            break
+        index += 1
+
+    return (True, path)
+
+
+def process_card(card_args: CardArgs) -> None:
+    """
+    Processes a single card file.
+
+    Args:
+        card_args: A tuple containing the command-line arguments, directory path,
+            filename, and Aho-Corasick trie.
+    """
+    args, dirpath, filename, trie = card_args
+    filepath = os.path.join(dirpath, filename)
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors="replace") as file:
+            data = file.read()
+    except (IOError, OSError) as e:
+        print(f"Error reading file {filepath}: {e}")
+        return
+
+    relative_dir = get_card_dir(trie, data, args)
+    if relative_dir:
+        dest_dir = os.path.join(args.output_dir, relative_dir)
+        changed, destpath = get_unused_path(dest_dir, filename)
+        if args.verbose:
+            msg = os.path.join(relative_dir, os.path.basename(
+                destpath)) if changed else relative_dir
+            print(f"'{filename}' -> '{msg}'")
+        if not args.testrun:
+            os.makedirs(dest_dir, exist_ok=True)
+            try:
+                shutil.move(filepath, destpath)
+            except (IOError, OSError) as e:
+                print(f"Error moving file {filepath} to {destpath}: {e}")
+
+
+def main() -> None:
+    """Main function to orchestrate the card sorting process."""
+    args = parse_args()
+    if args.testrun:
+        print("Test run, no files will be moved")
+    trie = create_trie(games)
+
+    full_output_dir = os.path.join(os.getcwd(), args.output_dir)
+    worklist: List[CardArgs] = []
+    for dirpath, _, filenames in os.walk(args.target_dir):
+        if dirpath.startswith(full_output_dir):
+            continue
+        for filename in filenames:
+            if filename.lower().endswith(SUPPORTED_EXTENSIONS):
+                worklist.append((args, dirpath, filename, trie))
+        if not args.recursive:
+            break
+
+    if args.verbose:
+        with multiprocessing.Pool() as pool:
+            pool.map(process_card, worklist)
+    else:
+        process_map(process_card, worklist, chunksize=1)
+
+
+if __name__ == "__main__":
+    main()
