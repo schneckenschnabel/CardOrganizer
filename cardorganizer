@@ -51,6 +51,8 @@ games: GamesDict = {
     "AA2": [("chara", [GAMES_SPECIAL_CHAR_AA2]), ("scene", [SCENE_SPECIAL_CHAR_AA2])],
     # add RG coordinate
     "RG": [("chara", ["【RG_Chara】"]), ("scene", ["【RoomStudio】"])],
+    # add SVS coordinate
+    "SVS": [("chara", ["【SVChara】"])],
 }
 
 sexs: SexDict = {MALE_CODE: "male", FEMALE_CODE: "female"}
