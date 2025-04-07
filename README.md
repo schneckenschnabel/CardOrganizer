@@ -4,12 +4,12 @@ This script is designed to automatically sort and organize illusion (illgames) c
 
 ## Supported Games
 
-* Koikatu
-* Koikatsu Sunshine
-* Honey Select 1/2
 * AI Syoujyo
-* Room Girl
+* Artificial Academy 2
+* Honey Select 1/2
+* Koikatsu Sunshine
+* Koikatu
 * PlayHome
+* Room Girl
 * Sexy Beach Premium Resort
 * Summer Vacation! Scramble
-* Artificial Academy 2
