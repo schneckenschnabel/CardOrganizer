@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
 
-"""
-This script automatically sorts and organizes image files (specifically PNG files,
-assumed to be "cards" from various Illusion games) into a structured directory
-hierarchy based on metadata found within the files themselves. It uses pattern
-matching to identify the game, card type, and gender (if applicable) of each card.
-"""
-
 import os
 import re
 import shutil
@@ -35,23 +28,27 @@ CardArgs = Tuple[argparse.Namespace, str, str, ahocorasick.Automaton]
 
 
 games: GamesDict = {
+    # Koikatu
     "KK": [("chara", ["【KoiKatuChara】", "【KoiKatuCharaS】", "【KoiKatuCharaSP】"]), ("coordinate", ["【KoiKatuClothes】"]), ("scene", ["【KStudio】"])],
-    # check if KKS coordinate is different
+    # Koikatsu Sunshine
     "KKS": [("chara", ["【KoiKatuCharaSun】"])],
+    # AI Syoujyo / Honey Select 2
     "AI": [("chara", ["【AIS_Chara】"]), ("coordinate", ["【AIS_Clothes】"]), ("scene", ["【StudioNEOV2】"]), ("housing", ["【AIS_Housing】"])],
-    # add EC coordinate
+    # EC
     "EC": [("chara", ["EroMakeChara"]), ("hscene", ["EroMakeHScene"]), ("map", ["EroMakeMap"]), ("pose", ["EroMakePose"])],
-    # add HS coordinate
+    # Honey Select
     "HS": [("female", ["【HoneySelectCharaFemale】"]), ("male", ["【HoneySelectCharaMale】"]), ("scene", ["【-neo-】"])],
-    # add PH coordinate
+    # PlayHome
     "PH": [("female", ["【PlayHome_Female】"]), ("male", ["【PlayHome_Male】"]), ("scene", ["【PHStudio】"])],
-    # add SBPR coordinate
+    # Sexy Beach Premium Resort
     "SBPR": [("female", ["【PremiumResortCharaFemale】"]), ("male", ["【PremiumResortCharaMale】"])],
-    "HC": [("chara", ["【HCChara】"])],  # add HC coordinate and scene
+    # Honey Come
+    "HC": [("chara", ["【HCChara】"])],
+    # Artificial Academy 2
     "AA2": [("chara", [GAMES_SPECIAL_CHAR_AA2]), ("scene", [SCENE_SPECIAL_CHAR_AA2])],
-    # add RG coordinate
+    # Room Girl
     "RG": [("chara", ["【RG_Chara】"]), ("scene", ["【RoomStudio】"])],
-    # add SVS coordinate
+    # Summer Vacation! Scramble
     "SVS": [("chara", ["【SVChara】"])],
 }
 

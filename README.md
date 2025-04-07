@@ -6,6 +6,7 @@ This script is designed to automatically sort and organize illusion (illgames) c
 
 * AI Syoujyo
 * Artificial Academy 2
+* Honey Come
 * Honey Select 1/2
 * Koikatsu Sunshine
 * Koikatu
